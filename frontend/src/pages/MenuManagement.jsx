@@ -181,7 +181,7 @@ const MenuManagement = () => {
     setShowCreateForm(false);
   };
 
-  // Check if a menu item can be prepared based on available ingredients
+  // Check if a menu item can be prepared based on available ingredients (no expired ingredients)
   const canPrepareItem = (menuItem) => {
     // Use the stock status from the backend if available
     if (menuItem.stockInfo) {
@@ -191,11 +191,21 @@ const MenuManagement = () => {
     // Fallback to local calculation if stockInfo is not available
     if (!menuItem.ingredients || menuItem.ingredients.length === 0) return true;
 
+    const now = new Date();
     return menuItem.ingredients.every(ingredient => {
       const ingId = getIngId(ingredient);
       if (!ingId) return false;
       const availableIngredient = availableIngredients.find(ing => ing._id === ingId);
       if (!availableIngredient) return false;
+      
+      // Check if ingredient is expired
+      if (availableIngredient.expiryDate && new Date(availableIngredient.expiryDate) < now) {
+        return false;
+      }
+      if (availableIngredient.status === 'expired') {
+        return false;
+      }
+      
       return availableIngredient.currentStock >= (ingredient.quantity ?? 0);
     });
   };
@@ -345,19 +355,32 @@ const MenuManagement = () => {
                     const availableIngredient = ingId
                       ? availableIngredients.find(ai => ai._id === ingId)
                       : null;
-                    const isAvailable = availableIngredient && availableIngredient.currentStock >= (ing.quantity ?? 0);
+                    const now = new Date();
+                    const isExpired = availableIngredient && (
+                      (availableIngredient.expiryDate && new Date(availableIngredient.expiryDate) < now) ||
+                      availableIngredient.status === 'expired'
+                    );
+                    const isAvailable = availableIngredient && !isExpired && availableIngredient.currentStock >= (ing.quantity ?? 0);
                     return (
-                      <li key={index} className={`flex items-center justify-between ${!isAvailable ? 'text-red-600' : ''}`}>
+                      <li key={index} className={`flex items-center justify-between ${
+                        !isAvailable || isExpired ? 'text-red-600' : ''
+                      }`}>
                         <span>
                           {getIngName(ing)}: {ing.quantity} {ing.unit}
+                          {isExpired && <span className="ml-2 text-xs font-semibold text-red-600">(EXPIRED)</span>}
                         </span>
                         {availableIngredient && (
                           <span className={`text-xs px-2 py-1 rounded ${
-                            isAvailable 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-red-100 text-red-800'
+                            isExpired
+                              ? 'bg-red-200 text-red-900'
+                              : isAvailable 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
                           }`}>
-                            {availableIngredient.currentStock} {ing.unit} available
+                            {isExpired 
+                              ? 'Expired' 
+                              : `${availableIngredient.currentStock} ${ing.unit} available`
+                            }
                           </span>
                         )}
                       </li>

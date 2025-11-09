@@ -27,6 +27,24 @@ export const checkIngredientAvailability = async (ingredients, quantity = 1) => 
             continue;
         }
 
+        // Check if ingredient is expired
+        const now = new Date();
+        const isExpired = inventoryItem.expiryDate && new Date(inventoryItem.expiryDate) < now;
+        
+        // If expired, treat as unavailable
+        if (isExpired || inventoryItem.status === 'expired') {
+            missingIngredients.push({
+                ingredient: ingredient.ingredient,
+                name: inventoryItem.name,
+                required: ingredient.quantity * quantity,
+                available: 0,
+                unit: ingredient.unit,
+                reason: 'Ingredient expired'
+            });
+            hasOutOfStock = true;
+            continue;
+        }
+
         const requiredQuantity = ingredient.quantity * quantity;
         const availableQuantity = inventoryItem.currentStock;
 

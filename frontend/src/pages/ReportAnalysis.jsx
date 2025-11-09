@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { MenuAPI, InventoryAPI, OrderAPI, SalesAPI } from '../utils/api.js';
+import { MenuAPI, InventoryAPI, OrderAPI, SalesAPI, WasteAPI } from '../utils/api.js';
 import {
   LineChart,
   Line,
@@ -46,11 +46,17 @@ const ReportAnalysis = () => {
   const [reportPeriod, setReportPeriod] = useState('30d');
   const [reportLoading, setReportLoading] = useState(false);
 
+  // Waste analytics state
+  const [wasteStats, setWasteStats] = useState(null);
+  const [wasteLogs, setWasteLogs] = useState([]);
+  const [wasteLoading, setWasteLoading] = useState(false);
+
   useEffect(() => {
     if (activeTab === 'order-shift') {
       fetchData();
     } else if (activeTab === 'reports') {
       fetchSalesData();
+      fetchWasteData();
     }
   }, [activeTab, reportPeriod]);
 
@@ -115,7 +121,68 @@ const ReportAnalysis = () => {
     }
   };
 
-  // Check if a menu item can be prepared based on available ingredients
+  const fetchWasteData = async () => {
+    setWasteLoading(true);
+    try {
+      const params = { period: reportPeriod };
+      
+      // Fetch both endpoints separately to handle errors gracefully
+      const [statsResponse, logsResponse] = await Promise.allSettled([
+        WasteAPI.getWasteStats(params),
+        WasteAPI.getAllWasteLogs({ limit: 50, page: 1 })
+      ]);
+
+      // Handle stats response
+      if (statsResponse.status === 'fulfilled') {
+        setWasteStats(statsResponse.value.data);
+      } else {
+        console.error('Error fetching waste stats:', statsResponse.reason);
+        // Set default empty stats if fetch fails
+        setWasteStats({
+          totalWasteLogs: 0,
+          totalWasteQuantity: 0,
+          totalFinancialLoss: 0,
+          wasteByCategory: [],
+          wasteByIngredient: [],
+          wasteTrends: []
+        });
+      }
+
+      // Handle logs response
+      if (logsResponse.status === 'fulfilled') {
+        setWasteLogs(logsResponse.value.data?.docs || logsResponse.value.data || []);
+      } else {
+        console.error('Error fetching waste logs:', logsResponse.reason);
+        // Set empty array if fetch fails
+        setWasteLogs([]);
+      }
+
+      // Show warning if one of the calls failed
+      if (statsResponse.status === 'rejected' || logsResponse.status === 'rejected') {
+        const failedCalls = [];
+        if (statsResponse.status === 'rejected') failedCalls.push('waste statistics');
+        if (logsResponse.status === 'rejected') failedCalls.push('waste logs');
+        toast.warning(`Failed to fetch ${failedCalls.join(' and ')}. Showing available data.`);
+      }
+    } catch (error) {
+      console.error('Error fetching waste data:', error);
+      // Set default values on complete failure
+      setWasteStats({
+        totalWasteLogs: 0,
+        totalWasteQuantity: 0,
+        totalFinancialLoss: 0,
+        wasteByCategory: [],
+        wasteByIngredient: [],
+        wasteTrends: []
+      });
+      setWasteLogs([]);
+      toast.error('Failed to fetch waste data: ' + error.message);
+    } finally {
+      setWasteLoading(false);
+    }
+  };
+
+  // Check if a menu item can be prepared based on available ingredients (no expired ingredients)
   const canPrepareItem = (menuItem) => {
     // Use the stock status from the backend if available
     if (menuItem.stockInfo) {
@@ -125,9 +192,22 @@ const ReportAnalysis = () => {
     // Fallback to local calculation if stockInfo is not available
     if (!menuItem.ingredients || menuItem.ingredients.length === 0) return true;
     
+    const now = new Date();
     return menuItem.ingredients.every(ingredient => {
-      const availableIngredient = availableIngredients.find(ing => ing._id === ingredient.ingredient._id);
+      const ingId = typeof ingredient.ingredient === 'string' 
+        ? ingredient.ingredient 
+        : ingredient.ingredient?._id;
+      const availableIngredient = availableIngredients.find(ing => ing._id === ingId);
       if (!availableIngredient) return false;
+      
+      // Check if ingredient is expired
+      if (availableIngredient.expiryDate && new Date(availableIngredient.expiryDate) < now) {
+        return false;
+      }
+      if (availableIngredient.status === 'expired') {
+        return false;
+      }
+      
       return availableIngredient.currentStock >= ingredient.quantity;
     });
   };
@@ -519,6 +599,178 @@ const ReportAnalysis = () => {
               </div>
             </div>
           )}
+
+          {/* Waste Analysis Section */}
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Waste Analysis</h3>
+              <button
+                onClick={async () => {
+                  try {
+                    setWasteLoading(true);
+                    await WasteAPI.processExpiredItems();
+                    await fetchWasteData();
+                    toast.success('Expired items processed and logged as waste successfully!');
+                  } catch (error) {
+                    toast.error('Failed to process expired items: ' + error.message);
+                  } finally {
+                    setWasteLoading(false);
+                  }
+                }}
+                className="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition-colors text-sm"
+              >
+                Process Expired Items
+              </button>
+            </div>
+
+            {wasteLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-red-500"></div>
+              </div>
+            ) : wasteStats ? (
+              <>
+                {/* Waste Statistics Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                  <div className="bg-red-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-red-600">Total Waste Logs</h4>
+                    <p className="text-2xl font-bold text-red-800">{wasteStats.totalWasteLogs || 0}</p>
+                  </div>
+                  <div className="bg-orange-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-orange-600">Total Waste Quantity</h4>
+                    <p className="text-2xl font-bold text-orange-800">{wasteStats.totalWasteQuantity?.toFixed(2) || '0.00'}</p>
+                  </div>
+                  <div className="bg-yellow-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-yellow-600">Financial Loss</h4>
+                    <p className="text-2xl font-bold text-yellow-800">${wasteStats.totalFinancialLoss?.toFixed(2) || '0.00'}</p>
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-lg">
+                    <h4 className="text-sm font-medium text-purple-600">Expired Items</h4>
+                    <p className="text-2xl font-bold text-purple-800">
+                      {wasteStats.wasteByCategory?.find(c => c._id === 'expired')?.count || 0}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Waste by Category Chart */}
+                {wasteStats.wasteByCategory && wasteStats.wasteByCategory.length > 0 && (
+                  <div className="mb-6">
+                    <h4 className="font-medium mb-3">Waste by Category</h4>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <PieChart>
+                        <Pie
+                          data={wasteStats.wasteByCategory}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="totalQuantity"
+                        >
+                          {wasteStats.wasteByCategory.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={`hsl(${index * 60}, 70%, 50%)`} />
+                          ))}
+                        </Pie>
+                        <Tooltip formatter={(value) => [value.toFixed(2), 'Quantity']} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Waste Trends Chart */}
+                {wasteStats.wasteTrends && wasteStats.wasteTrends.length > 0 && (
+                  <div className="mb-6">
+                    <h4 className="font-medium mb-3">Waste Trends (Last 30 Days)</h4>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <AreaChart data={wasteStats.wasteTrends.map(trend => ({
+                        date: `${trend._id.month}/${trend._id.day}`,
+                        quantity: trend.totalQuantity,
+                        count: trend.count
+                      }))}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Area type="monotone" dataKey="quantity" stroke="#ff6b6b" fill="#ff6b6b" name="Waste Quantity" />
+                        <Area type="monotone" dataKey="count" stroke="#ffa500" fill="#ffa500" name="Waste Logs" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* Top Wasted Ingredients */}
+                {wasteStats.wasteByIngredient && wasteStats.wasteByIngredient.length > 0 && (
+                  <div className="mb-6">
+                    <h4 className="font-medium mb-3">Top Wasted Ingredients</h4>
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="px-4 py-2 text-left">Ingredient</th>
+                            <th className="px-4 py-2 text-right">Quantity</th>
+                            <th className="px-4 py-2 text-right">Logs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wasteStats.wasteByIngredient.map((item, index) => (
+                            <tr key={index} className="border-b">
+                              <td className="px-4 py-2">{item.ingredient?.name || 'Unknown'}</td>
+                              <td className="px-4 py-2 text-right">{item.totalQuantity?.toFixed(2)} {item.ingredient?.unit || ''}</td>
+                              <td className="px-4 py-2 text-right">{item.count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent Waste Logs */}
+                {wasteLogs.length > 0 && (
+                  <div>
+                    <h4 className="font-medium mb-3">Recent Waste Logs</h4>
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="px-4 py-2 text-left">Ingredient</th>
+                            <th className="px-4 py-2 text-left">Category</th>
+                            <th className="px-4 py-2 text-right">Quantity</th>
+                            <th className="px-4 py-2 text-left">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {wasteLogs.slice(0, 10).map((log) => (
+                            <tr key={log._id} className="border-b">
+                              <td className="px-4 py-2">{log.ingredient?.name || 'Unknown'}</td>
+                              <td className="px-4 py-2">
+                                <span className={`px-2 py-1 rounded-full text-xs ${
+                                  log.category === 'expired' ? 'bg-red-100 text-red-800' :
+                                  log.category === 'spoiled' ? 'bg-orange-100 text-orange-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {log.category}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 text-right">{log.quantity} {log.unit}</td>
+                              <td className="px-4 py-2 text-left">
+                                {new Date(log.loggedAt).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-8 text-gray-500">
+                <p>No waste data available. Process expired items to generate waste logs.</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -552,7 +804,7 @@ const ReportAnalysis = () => {
 
           {/* Menu Items Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredMenuItems.map((item) => (
+            {filteredMenuItems.filter(item => canPrepareItem(item)).map((item) => (
               <div key={item._id} className="bg-white rounded-lg shadow-md p-6">
                 <h3 className="text-lg font-semibold mb-2">{item.name}</h3>
                 {item.description && (
@@ -712,7 +964,8 @@ const ReportAnalysis = () => {
                 <div className="max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-white">
                   {menuItems
                     .filter(item => 
-                      item.name.toLowerCase().includes(orderSearchTerm.toLowerCase())
+                      item.name.toLowerCase().includes(orderSearchTerm.toLowerCase()) &&
+                      canPrepareItem(item) // Only show items that can be prepared (no expired ingredients)
                     )
                     .map((item) => (
                       <div key={item._id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">

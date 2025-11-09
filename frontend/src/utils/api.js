@@ -400,3 +400,69 @@ export const SalesAPI = {
     return http(`/sales/profit-margin${queryParams ? `?${queryParams}` : ''}`);
   }
 };
+
+export const WasteAPI = {
+  // Get all waste logs
+  getAllWasteLogs(params = {}) {
+    const queryParams = new URLSearchParams(params).toString();
+    return http(`/waste${queryParams ? `?${queryParams}` : ''}`);
+  },
+
+  // Get single waste log
+  getWasteLogById(id) {
+    return http(`/waste/${id}`);
+  },
+
+  // Create waste log
+  createWasteLog(wasteData) {
+    return http("/waste", { method: "POST", body: wasteData });
+  },
+
+  // Get waste statistics
+  getWasteStats(params = {}) {
+    const queryParams = new URLSearchParams(params).toString();
+    return http(`/waste/stats${queryParams ? `?${queryParams}` : ''}`);
+  },
+
+  // Process expired items and log them as waste
+  processExpiredItems() {
+    return http("/waste/process-expired", { method: "POST" });
+  }
+};
+
+export const DailyInventoryAPI = {
+  // Get today's inventory
+  getTodayInventory() {
+    return http("/daily-inventory/today");
+  },
+
+  // Get inventory for a specific date
+  getDateInventory(date) {
+    return http(`/daily-inventory/date/${date}`);
+  },
+
+  // Get day status
+  getDayStatus() {
+    return http("/daily-inventory/day-status");
+  },
+
+  // Get available items (generalized inventory items)
+  getAvailableItems() {
+    return http("/daily-inventory/available-items");
+  },
+
+  // Add item to today's inventory
+  addItemToToday(itemData) {
+    return http("/daily-inventory/add-item", { method: "POST", body: itemData });
+  },
+
+  // End the day
+  endDay() {
+    return http("/daily-inventory/end-day", { method: "POST" });
+  },
+
+  // Start new day
+  startNewDay() {
+    return http("/daily-inventory/start-new-day", { method: "POST" });
+  }
+};

@@ -10,7 +10,8 @@ import {
     getItemsByCategory,
     getInventoryStats,
     exportInventoryToCSV,
-    processExpiredInventoryItems
+    processExpiredInventoryItems,
+    applyDailyIntake
 } from "../controllers/inventory.controller.js";
 import { verifyAdminOrChef, verifyChef } from "../middleware/auth.middleware.js";
 import { upload } from "../middleware/multer.middleware.js";
@@ -38,6 +39,9 @@ router.route("/expired").get(getExpiredItems);
 
 // Process expired items and log them as waste
 router.route("/process-expired").post(verifyChef, processExpiredInventoryItems);
+
+// Apply daily intake (bulk add to stock)
+router.route("/daily-intake").post(verifyChef, applyDailyIntake);
 
 // Get items by category
 router.route("/category/:category").get(getItemsByCategory);

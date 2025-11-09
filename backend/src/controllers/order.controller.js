@@ -7,6 +7,7 @@ import { InventoryItem } from "../models/inventory/inventoryItem.model.js";
 import { Inventorylog } from "../models/inventory/inventorylog.model.js";
 import { Sales } from "../models/demand/salesData.model.js";
 import { checkIngredientAvailability } from "../utils/stockChecker.js";
+import { deductFromDailyInventory } from "./dailyInventory.controller.js";
 
 // Create new order
 const createOrder = asyncHandler(async (req, res) => {
@@ -137,7 +138,7 @@ const createOrder = asyncHandler(async (req, res) => {
                             continue;
                         }
 
-                        // Check if sufficient stock is available
+                        // Check if sufficient stock is available in main inventory
                         if (inventoryItem.currentStock < requiredQuantity) {
                             throw new apiError(
                                 `Insufficient stock for ${inventoryItem.name}. Available: ${inventoryItem.currentStock}, Required: ${requiredQuantity}`,
@@ -145,17 +146,8 @@ const createOrder = asyncHandler(async (req, res) => {
                             );
                         }
 
-                        // Deduct from inventory (prevent negative values)
-                        const newStock = Math.max(0, inventoryItem.currentStock - requiredQuantity);
-                        await InventoryItem.findByIdAndUpdate(
-                            ingredientId,
-                            { 
-                                currentStock: newStock,
-                                quantity: newStock, // Also update quantity to match currentStock
-                                lastUpdatedBy: req.user._id
-                            },
-                            { new: true }
-                        );
+                        // Deduct from daily inventory (this also updates main inventory)
+                        await deductFromDailyInventory(ingredientId, requiredQuantity, req.user._id);
 
                         // Create inventory log entry
                         await Inventorylog.create({
@@ -488,13 +480,16 @@ const updateOrder = asyncHandler(async (req, res) => {
             for (const ingredient of menuItem.ingredients) {
                 const requiredQuantity = ingredient.quantity * orderItem.quantity;
                 
-                await InventoryItem.findByIdAndUpdate(
-                    ingredient.ingredient._id,
-                    { 
-                        $inc: { currentStock: -requiredQuantity },
-                        lastUpdatedBy: req.user._id
+                // Deduct from daily inventory (this also updates main inventory)
+                try {
+                    await deductFromDailyInventory(ingredient.ingredient._id, requiredQuantity, req.user._id);
+                } catch (error) {
+                    console.error(`Error deducting from daily inventory for ingredient ${ingredient.ingredient._id}:`, error);
+                    // If it's an apiError, throw it
+                    if (error instanceof apiError) {
+                        throw error;
                     }
-                );
+                }
             }
         }
 

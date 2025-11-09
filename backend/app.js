@@ -18,18 +18,49 @@ app.use(cookieParser())
 //routes
 import userRouter from "./src/routes/user.route.js"
 import inventoryRouter from "./src/routes/inventory.route.js"
+import dailyInventoryRouter from "./src/routes/dailyInventory.route.js"
 import dashboardRouter from "./src/routes/dashboard.route.js"
 import menuRouter from "./src/routes/menu.route.js"
 import orderRouter from "./src/routes/order.route.js"
 import salesRouter from "./src/routes/sales.route.js"
+import wasteRouter from "./src/routes/waste.route.js"
+
+// Health check endpoint (before routes)
+app.get("/api/v1/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "Server is running",
+        timestamp: new Date().toISOString()
+    });
+});
 
 //routes declaration
 app.use("/api/v1/user",userRouter)
 app.use("/api/v1/inventory",inventoryRouter)
+app.use("/api/v1/daily-inventory",dailyInventoryRouter)
 app.use("/api/v1/dashboard",dashboardRouter)
 app.use("/api/v1/menu",menuRouter)
 app.use("/api/v1/orders",orderRouter)
 app.use("/api/v1/sales",salesRouter)
+app.use("/api/v1/waste",wasteRouter)
+
+// Log registered routes for debugging
+console.log("✅ Registered routes:");
+console.log("  - GET  /api/v1/health");
+console.log("  - POST /api/v1/user/login");
+console.log("  - GET  /api/v1/waste");
+console.log("  - GET  /api/v1/waste/stats");
+console.log("  - POST /api/v1/waste/process-expired");
+
+// 404 handler for undefined routes
+app.use((req, res, next) => {
+    res.status(404).json({
+        success: false,
+        message: `Route not found: ${req.method} ${req.originalUrl}`,
+        data: null,
+        errors: []
+    });
+});
 
 // Error handling middleware
 app.use((err, req, res, next) => {

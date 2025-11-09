@@ -5,6 +5,7 @@ import { InventoryItem } from "../models/inventory/inventoryItem.model.js";
 import { uploadCloudinary } from "../utils/cloudinary.js";
 import { calculateExpiryDate, requiresManualExpiryDate, getDefaultExpiryDate } from "../utils/expiryCalculator.js";
 import { processExpiredItems, checkExpiredItems } from "../utils/expiredItemsHandler.js";
+import { Inventorylog } from "../models/inventory/inventorylog.model.js";
 import fs from 'fs';
 import path from 'path';
 
@@ -39,6 +40,12 @@ const getAllInventoryItems = asyncHandler(async (req, res) => {
     // Check and update expired items status (run in background, don't wait)
     checkExpiredItems().catch(err => {
         console.error('Error checking expired items:', err);
+    });
+    
+    // Process expired items and log them as waste (run in background, don't wait)
+    // This will automatically create waste logs for expired items
+    processExpiredItems().catch(err => {
+        console.error('Error processing expired items:', err);
     });
 
     // Get total count for pagination info
@@ -517,6 +524,59 @@ const processExpiredInventoryItems = asyncHandler(async (req, res) => {
     }
 });
 
+// Apply daily intake to inventory items (bulk add stock per day)
+const applyDailyIntake = asyncHandler(async (req, res) => {
+    const { entries } = req.body;
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+        throw new apiError("'entries' must be a non-empty array", 400);
+    }
+
+    const now = new Date();
+    const results = [];
+
+    for (const entry of entries) {
+        const { inventoryItemId, quantity, reason } = entry || {};
+
+        if (!inventoryItemId || quantity === undefined || quantity === null) {
+            continue;
+        }
+
+        const addQty = Number(quantity);
+        if (Number.isNaN(addQty) || addQty <= 0) {
+            continue;
+        }
+
+        const updated = await InventoryItem.findByIdAndUpdate(
+            inventoryItemId,
+            {
+                $inc: { currentStock: addQty, quantity: addQty },
+                lastUpdatedBy: req.user?._id
+            },
+            { new: true }
+        );
+
+        if (!updated) {
+            continue;
+        }
+
+        try {
+            await Inventorylog.create({
+                ingredient: inventoryItemId,
+                change: addQty,
+                reason: reason || "Daily intake",
+                date: now
+            });
+        } catch (_) { /* ignore log failures */ }
+
+        results.push({ id: updated._id, name: updated.name, newStock: updated.currentStock });
+    }
+
+    return res.status(200).json(
+        new apiResponse(200, { updatedCount: results.length, results }, "Daily intake applied")
+    );
+});
+
 export {
     getAllInventoryItems,
     getInventoryItemById,
@@ -528,5 +588,6 @@ export {
     getItemsByCategory,
     getInventoryStats,
     exportInventoryToCSV,
-    processExpiredInventoryItems
+    processExpiredInventoryItems,
+    applyDailyIntake
 };
